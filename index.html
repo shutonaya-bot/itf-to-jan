@@ -1,180 +1,202 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#111827">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ITF → JAN</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;background:#f5f5f7;color:#111}
-main{max-width:560px;margin:auto;padding:22px 16px 40px}
-h1{text-align:center;font-size:30px;margin:12px 0 6px}
-.sub{text-align:center;color:#666;margin-bottom:18px}
-.card{background:white;border-radius:18px;padding:18px;margin:12px 0;box-shadow:0 2px 10px #00000012}
-#reader{width:100%;overflow:hidden;border-radius:14px;background:#111;min-height:80px}
-button{width:100%;border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:700;background:#111827;color:white;margin-top:12px}
-button.secondary{background:#e5e7eb;color:#111}
-.label{font-size:14px;color:#777}
-.jan{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:30px;font-weight:800;letter-spacing:1px;text-align:center;margin-top:5px}
-.itf{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:18px;text-align:center;margin-top:5px}
-.msg{text-align:center;line-height:1.5}
-.note{font-size:13px;color:#666;line-height:1.6}
-.ok{color:#0a7b34}.err{color:#b42318}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;margin:0;padding:20px;background:#f5f5f7}
+h1{font-size:32px}
+#reader{width:100%;max-width:600px;margin:auto}
+button{font-size:20px;padding:15px 25px;margin:15px;border:0;border-radius:12px;background:#111;color:white}
+.box{background:white;border-radius:18px;padding:20px;margin:20px auto;max-width:600px}
+.label{color:#666;margin-top:10px}
+.value{font-size:30px;font-weight:bold;word-break:break-all;margin:8px}
+.ok{color:green}
+.error{color:red}
 </style>
 </head>
+
 <body>
-<main>
+
 <h1>ITF → JAN</h1>
-<div class="sub">ITF-14を読み取ってJAN-13へ変換</div>
 
-<div class="card">
-  <div id="reader"></div>
-  <button id="start">📷 カメラでITFを読み取る</button>
-  <button id="stop" class="secondary" style="display:none">カメラを止める</button>
+<div class="box">
+<div id="reader"></div>
+<button id="start">📷 カメラで読み取る</button>
+<button id="stop" style="display:none">カメラ停止</button>
 </div>
 
-<div class="card">
-  <div class="label">読み取ったITF</div>
-  <div id="itf" class="itf">—</div>
-  <hr>
-  <div class="label">変換後JAN</div>
-  <div id="jan" class="jan">—</div>
-  <p id="message" class="msg"></p>
+<div class="box">
+<div class="label">読み取ったコード</div>
+<div id="raw" class="value">---</div>
+
+<div class="label">変換後JAN</div>
+<div id="jan" class="value">---</div>
+
+<div id="msg"></div>
 </div>
 
-<div class="card note">
-<b>使い方</b><br>
-①「カメラでITFを読み取る」→ ② ITFバーコードをカメラにかざす → ③ JANを表示<br><br>
-このアプリは通常の集合包装用GTIN-14（ITF-14）を対象にしています。読み取った数字からJANのチェックデジットを計算します。
-</div>
-</main>
-
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
-const $ = id => document.getElementById(id);
-let scanner = null;
-let running = false;
-
-function digits(s){ return (s || "").replace(/\D/g,""); }
+let scanner=null;
+let running=false;
 
 function checkDigit(body){
-  let sum=0, rev=body.split("").reverse();
-  for(let i=0;i<rev.length;i++){
-    sum += Number(rev[i]) * (i%2===0 ? 3 : 1);
+  let sum=0;
+  let n=0;
+  for(let i=body.length-1;i>=0;i--,n++){
+    sum+=Number(body[i])*(n%2===0?3:1);
   }
-  return (10 - (sum % 10)) % 10;
+  return String((10-sum%10)%10);
 }
 
-function validGTIN14(code){
-  if(code.length!==14 || !/^\d+$/.test(code)) return false;
-  return Number(code[13]) === checkDigit(code.slice(0,13));
+function valid(code){
+  if(!/^\d+$/.test(code)) return false;
+  return checkDigit(code.slice(0,-1))===code.slice(-1);
 }
 
-function validJAN13(code){
-  if(code.length!==13 || !/^\d+$/.test(code)) return false;
-  return Number(code[12]) === checkDigit(code.slice(0,12));
+function normalize(s){
+  s=String(s).trim();
+
+  // GS1-128の識別子
+  s=s.replace(/^\]C1/,"");
+
+  // (01)14987376553718
+  let m=s.match(/^\(01\)\s*(\d{14})/);
+  if(m) return m[1];
+
+  // 0114987376553718
+  m=s.match(/^01(\d{14})/);
+  if(m) return m[1];
+
+  let d=s.replace(/\D/g,"");
+
+  if(d.length===14) return d;
+  if(d.length===16 && d.startsWith("01")) return d.slice(2);
+
+  return d;
 }
 
-function convert(raw){
-  const code = digits(raw);
-  $("itf").textContent = code || "—";
-  $("jan").textContent = "—";
-  $("message").className = "msg";
+function convert(s){
 
-  if(code.length !== 14){
-    $("message").textContent = "14桁のITF-14を読み取ってください。";
-    $("message").classList.add("err");
-    return false;
+  s=normalize(s);
+
+  if(!/^\d{14}$/.test(s)){
+    throw new Error("14桁のGTIN-14を読み取れませんでした");
   }
 
-  if(code[0] === "0"){
-    const jan = code.slice(1);
-    if(validJAN13(jan)){
-      $("jan").textContent = jan;
-      $("message").textContent = "先頭0を除いてJAN-13として取得しました。";
-      $("message").classList.add("ok");
-      return true;
-    }
-    $("message").textContent = "先頭0ですが、JAN-13のチェックデジットが一致しません。";
-    $("message").classList.add("err");
-    return false;
+  if(!valid(s)){
+    throw new Error("バーコードのチェックデジットが正しくありません");
   }
 
-  if(!/[1-8]/.test(code[0])){
-    $("message").textContent = "先頭が1～8ではないため、自動変換できません。";
-    $("message").classList.add("err");
-    return false;
+  // 0 + JAN13
+  if(s[0]==="0"){
+    let j=s.slice(1);
+    if(valid(j)) return j;
   }
 
-  if(!validGTIN14(code)){
-    $("message").textContent = "ITF-14のチェックデジットが一致しません。";
-    $("message").classList.add("err");
-    return false;
+  // indicator + JAN本体12桁 + GTIN14チェック
+  if(!/^[1-8]$/.test(s[0])){
+    throw new Error("対応していないGTIN-14です");
   }
 
-  const body12 = code.slice(1,13);
-  const jan = body12 + checkDigit(body12);
-  $("jan").textContent = jan;
-  $("message").textContent = "JANを自動計算しました。";
-  $("message").classList.add("ok");
-  return true;
+  let body=s.slice(1,13);
+  return body+checkDigit(body);
 }
 
-async function stop(){
-  if(scanner && running){
-    try{ await scanner.stop(); }catch(e){}
-    running=false;
-  }
-  $("start").style.display="";
-  $("stop").style.display="none";
-}
+function result(text){
 
-$("start").onclick = async ()=>{
-  if(!window.isSecureContext){
-    $("message").textContent="カメラ利用にはHTTPSのページが必要です。";
-    $("message").className="msg err";
-    return;
-  }
-  if(!window.Html5Qrcode){
-    $("message").textContent="バーコード読み取り機能の読み込みに失敗しました。通信状態を確認してください。";
-    $("message").className="msg err";
-    return;
-  }
+  let code=normalize(text);
 
-  scanner = new Html5Qrcode("reader");
-  $("start").style.display="none";
-  $("stop").style.display="";
-  running=true;
+  document.getElementById("raw").textContent=code;
 
   try{
+    let jan=convert(code);
+
+    document.getElementById("jan").textContent=jan;
+    document.getElementById("jan").className="value ok";
+
+    document.getElementById("msg").textContent="変換成功";
+    document.getElementById("msg").className="ok";
+
+    stopCamera();
+
+  }catch(e){
+
+    document.getElementById("jan").textContent="---";
+    document.getElementById("jan").className="value";
+
+    document.getElementById("msg").textContent=e.message;
+    document.getElementById("msg").className="error";
+  }
+}
+
+async function startCamera(){
+
+  if(running)return;
+
+  scanner=new Html5Qrcode("reader");
+
+  let config={
+    fps:10,
+    qrbox:function(w,h){
+      return{
+        width:Math.min(w*0.9,700),
+        height:Math.min(h*0.45,250)
+      };
+    },
+    formatsToSupport:[
+      Html5QrcodeSupportedFormats.ITF,
+      Html5QrcodeSupportedFormats.CODE_128
+    ],
+    experimentalFeatures:{
+      useBarCodeDetectorIfSupported:false
+    }
+  };
+
+  try{
+
     await scanner.start(
       {facingMode:"environment"},
-      {
-        fps:10,
-        qrbox:{width:Math.min(320,window.innerWidth-70),height:160},
-        aspectRatio:1.777
+      config,
+      function(text){
+        result(text);
       },
-      async (decodedText)=>{
-        const code=digits(decodedText);
-        if(code.length===14){
-          convert(code);
-          await stop();
-        }
-      },
-      ()=>{}
+      function(){}
     );
-  }catch(e){
-    running=false;
-    $("start").style.display="";
-    $("stop").style.display="none";
-    $("message").textContent="カメラを開始できませんでした。Safariのカメラ許可を確認してください。";
-    $("message").className="msg err";
-  }
-};
 
-$("stop").onclick=stop;
+    running=true;
+
+    document.getElementById("start").style.display="none";
+    document.getElementById("stop").style.display="inline-block";
+
+  }catch(e){
+
+    document.getElementById("msg").textContent=
+      "カメラを起動できませんでした："+e.message;
+  }
+}
+
+async function stopCamera(){
+
+  if(!scanner||!running)return;
+
+  try{
+    await scanner.stop();
+    scanner.clear();
+  }catch(e){}
+
+  running=false;
+
+  document.getElementById("start").style.display="inline-block";
+  document.getElementById("stop").style.display="none";
+}
+
+document.getElementById("start").onclick=startCamera;
+document.getElementById("stop").onclick=stopCamera;
+
 </script>
+
 </body>
 </html>
