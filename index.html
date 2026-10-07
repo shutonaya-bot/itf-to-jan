@@ -5,194 +5,302 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ITF → JAN</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<!-- JANバーコード生成ライブラリ -->
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;margin:0;padding:20px;background:#f5f5f7}
-h1{font-size:32px}
-#reader{width:100%;max-width:600px;margin:auto}
-button{font-size:20px;padding:15px 25px;margin:15px;border:0;border-radius:12px;background:#111;color:white}
-.box{background:white;border-radius:18px;padding:20px;margin:20px auto;max-width:600px}
-.label{color:#666;margin-top:10px}
-.value{font-size:30px;font-weight:bold;word-break:break-all;margin:8px}
-.ok{color:green}
-.error{color:red}
+body{
+    font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+    text-align:center;
+    margin:0;
+    padding:20px;
+    background:#f5f5f7;
+}
+h1{
+    font-size:32px;
+}
+#reader{
+    width:100%;
+    max-width:600px;
+    margin:auto;
+}
+button{
+    font-size:20px;
+    padding:15px 25px;
+    margin:15px;
+    border:0;
+    border-radius:12px;
+    background:#111;
+    color:white;
+}
+.box{
+    background:white;
+    border-radius:18px;
+    padding:20px;
+    margin:20px auto;
+    max-width:600px;
+}
+.label{
+    color:#666;
+    margin-top:10px;
+}
+.value{
+    font-size:30px;
+    font-weight:bold;
+    word-break:break-all;
+    margin:8px;
+}
+.ok{
+    color:green;
+}
+.error{
+    color:red;
+}
+#barcodeArea{
+    margin-top:20px;
+    display:none;
+}
+#barcode{
+    width:100%;
+    max-width:500px;
+    height:auto;
+}
+#janNumber{
+    font-size:28px;
+    font-weight:bold;
+    margin-top:10px;
+}
 </style>
 </head>
-
 <body>
-
 <h1>ITF → JAN</h1>
-
 <div class="box">
-<div id="reader"></div>
-<button id="start">📷 カメラで読み取る</button>
-<button id="stop" style="display:none">カメラ停止</button>
+    <div id="reader"></div>
+    <button id="start">
+        📷 カメラで読み取る
+    </button>
+    <button id="stop" style="display:none">
+        カメラ停止
+    </button>
 </div>
-
 <div class="box">
-<div class="label">読み取ったコード</div>
-<div id="raw" class="value">---</div>
-
-<div class="label">変換後JAN</div>
-<div id="jan" class="value">---</div>
-
-<div id="msg"></div>
+    <div class="label">
+        読み取ったコード
+    </div>
+    <div id="raw" class="value">
+        ---
+    </div>
+    <div class="label">
+        変換後JAN
+    </div>
+    <!-- JANバーコード -->
+    <div id="barcodeArea">
+        <svg id="barcode"></svg>
+        <div id="janNumber"></div>
+    </div>
+    <div id="msg"></div>
 </div>
-
 <script>
 let scanner=null;
 let running=false;
-
+/* =========================
+   チェックデジット計算
+========================= */
 function checkDigit(body){
-  let sum=0;
-  let n=0;
-  for(let i=body.length-1;i>=0;i--,n++){
-    sum+=Number(body[i])*(n%2===0?3:1);
-  }
-  return String((10-sum%10)%10);
-}
-
-function valid(code){
-  if(!/^\d+$/.test(code)) return false;
-  return checkDigit(code.slice(0,-1))===code.slice(-1);
-}
-
-function normalize(s){
-  s=String(s).trim();
-
-  // GS1-128の識別子
-  s=s.replace(/^\]C1/,"");
-
-  // (01)14987376553718
-  let m=s.match(/^\(01\)\s*(\d{14})/);
-  if(m) return m[1];
-
-  // 0114987376553718
-  m=s.match(/^01(\d{14})/);
-  if(m) return m[1];
-
-  let d=s.replace(/\D/g,"");
-
-  if(d.length===14) return d;
-  if(d.length===16 && d.startsWith("01")) return d.slice(2);
-
-  return d;
-}
-
-function convert(s){
-
-  s=normalize(s);
-
-  if(!/^\d{14}$/.test(s)){
-    throw new Error("14桁のGTIN-14を読み取れませんでした");
-  }
-
-  if(!valid(s)){
-    throw new Error("バーコードのチェックデジットが正しくありません");
-  }
-
-  // 0 + JAN13
-  if(s[0]==="0"){
-    let j=s.slice(1);
-    if(valid(j)) return j;
-  }
-
-  // indicator + JAN本体12桁 + GTIN14チェック
-  if(!/^[1-8]$/.test(s[0])){
-    throw new Error("対応していないGTIN-14です");
-  }
-
-  let body=s.slice(1,13);
-  return body+checkDigit(body);
-}
-
-function result(text){
-
-  let code=normalize(text);
-
-  document.getElementById("raw").textContent=code;
-
-  try{
-    let jan=convert(code);
-
-    document.getElementById("jan").textContent=jan;
-    document.getElementById("jan").className="value ok";
-
-    document.getElementById("msg").textContent="変換成功";
-    document.getElementById("msg").className="ok";
-
-    stopCamera();
-
-  }catch(e){
-
-    document.getElementById("jan").textContent="---";
-    document.getElementById("jan").className="value";
-
-    document.getElementById("msg").textContent=e.message;
-    document.getElementById("msg").className="error";
-  }
-}
-
-async function startCamera(){
-
-  if(running)return;
-
-  scanner=new Html5Qrcode("reader");
-
-  let config={
-    fps:10,
-    qrbox:function(w,h){
-      return{
-        width:Math.min(w*0.9,700),
-        height:Math.min(h*0.45,250)
-      };
-    },
-    experimentalFeatures:{
-      useBarCodeDetectorIfSupported:false
+    let sum=0;
+    let n=0;
+    for(let i=body.length-1;i>=0;i--,n++){
+        sum += Number(body[i]) *
+               (n % 2 === 0 ? 3 : 1);
     }
-  };
-
-  try{
-
-    await scanner.start(
-      {facingMode:"environment"},
-      config,
-      function(text){
-        result(text);
-      },
-      function(){}
-    );
-
-    running=true;
-
-    document.getElementById("start").style.display="none";
-    document.getElementById("stop").style.display="inline-block";
-
-  }catch(e){
-
-    document.getElementById("msg").textContent=
-      "カメラを起動できませんでした："+e.message;
-  }
+    return String((10 - sum % 10) % 10);
 }
-
+/* =========================
+   チェックデジット確認
+========================= */
+function valid(code){
+    if(!/^\d+$/.test(code))
+        return false;
+    return checkDigit(code.slice(0,-1))
+           === code.slice(-1);
+}
+/* =========================
+   読み取りデータ整理
+========================= */
+function normalize(s){
+    s=String(s).trim();
+    // GS1-128
+    s=s.replace(/^\]C1/,"");
+    // (01)14987376553718
+    let m=s.match(/^\(01\)\s*(\d{14})/);
+    if(m)
+        return m[1];
+    // 0114987376553718
+    m=s.match(/^01(\d{14})/);
+    if(m)
+        return m[1];
+    // 数字だけ取り出す
+    let d=s.replace(/\D/g,"");
+    if(d.length===14)
+        return d;
+    if(d.length===16 && d.startsWith("01"))
+        return d.slice(2);
+    return d;
+}
+/* =========================
+   ITF-14 → JAN-13
+========================= */
+function convert(s){
+    s=normalize(s);
+    if(!/^\d{14}$/.test(s)){
+        throw new Error(
+            "14桁のGTIN-14を読み取れませんでした"
+        );
+    }
+    if(!valid(s)){
+        throw new Error(
+            "バーコードのチェックデジットが正しくありません"
+        );
+    }
+    /*
+       ITF-14が0始まりの場合
+       0 + JAN13
+       なので先頭の0を外す
+    */
+    if(s[0]==="0"){
+        let j=s.slice(1);
+        if(valid(j))
+            return j;
+    }
+    /*
+       インジケータ + JAN本体12桁
+    */
+    if(!/^[1-8]$/.test(s[0])){
+        throw new Error(
+            "対応していないGTIN-14です"
+        );
+    }
+    let body=s.slice(1,13);
+    return body + checkDigit(body);
+}
+/* =========================
+   JANバーコード表示
+========================= */
+function showJANBarcode(jan){
+    const area =
+        document.getElementById("barcodeArea");
+    const number =
+        document.getElementById("janNumber");
+    // バーコード生成
+    JsBarcode("#barcode", jan, {
+        format:"EAN13",
+        lineColor:"#000000",
+        width:3,
+        height:150,
+        displayValue:true,
+        fontSize:24,
+        margin:20,
+        background:"#ffffff"
+    });
+    number.textContent = jan;
+    area.style.display="block";
+}
+/* =========================
+   読み取り結果
+========================= */
+function result(text){
+    let code=normalize(text);
+    document.getElementById("raw").textContent=code;
+    try{
+        let jan=convert(code);
+        /*
+           JAN数字を表示
+        */
+        document.getElementById("janNumber")
+            .textContent=jan;
+        /*
+           JANバーコードを生成
+        */
+        showJANBarcode(jan);
+        document.getElementById("msg")
+            .textContent="変換成功";
+        document.getElementById("msg")
+            .className="ok";
+        /*
+           読み取り成功したら
+           カメラ停止
+        */
+        stopCamera();
+    }catch(e){
+        document.getElementById("barcodeArea")
+            .style.display="none";
+        document.getElementById("msg")
+            .textContent=e.message;
+        document.getElementById("msg")
+            .className="error";
+    }
+}
+/* =========================
+   カメラ開始
+========================= */
+async function startCamera(){
+    if(running)
+        return;
+    scanner=new Html5Qrcode("reader");
+    let config={
+        fps:10,
+        qrbox:function(w,h){
+            return{
+                width:Math.min(w*0.9,700),
+                height:Math.min(h*0.45,250)
+            };
+        },
+        experimentalFeatures:{
+            useBarCodeDetectorIfSupported:false
+        }
+    };
+    try{
+        await scanner.start(
+            {facingMode:"environment"},
+            config,
+            function(text){
+                result(text);
+            },
+            function(){}
+        );
+        running=true;
+        document.getElementById("start")
+            .style.display="none";
+        document.getElementById("stop")
+            .style.display="inline-block";
+    }catch(e){
+        document.getElementById("msg")
+            .textContent=
+            "カメラを起動できませんでした："+e.message;
+    }
+}
+/* =========================
+   カメラ停止
+========================= */
 async function stopCamera(){
-
-  if(!scanner||!running)return;
-
-  try{
-    await scanner.stop();
-    scanner.clear();
-  }catch(e){}
-
-  running=false;
-
-  document.getElementById("start").style.display="inline-block";
-  document.getElementById("stop").style.display="none";
+    if(!scanner || !running)
+        return;
+    try{
+        await scanner.stop();
+        scanner.clear();
+    }catch(e){}
+    running=false;
+    document.getElementById("start")
+        .style.display="inline-block";
+    document.getElementById("stop")
+        .style.display="none";
 }
-
-document.getElementById("start").onclick=startCamera;
-document.getElementById("stop").onclick=stopCamera;
-
+/* =========================
+   ボタン
+========================= */
+document.getElementById("start")
+    .onclick=startCamera;
+document.getElementById("stop")
+    .onclick=stopCamera;
 </script>
-
 </body>
 </html>
